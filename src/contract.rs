@@ -83,7 +83,7 @@ mod exec {
             }
         };
 
-        GAMES.save(deps.storage, (&info.sender, &guest_addr), &games)?;
+        GAMES.save(deps.storage, (&info.sender, guest_addr), &games)?;
 
         Ok(Response::default()
             .add_attribute("action", "invit")
