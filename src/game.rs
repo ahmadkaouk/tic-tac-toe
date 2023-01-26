@@ -103,16 +103,88 @@ mod tests {
     }
 
     #[test]
-    fn test_game_over() {
+    fn test_invalid_move() {
+        let mut game = Game::new();
+
+        assert_eq!(game.play(Player::X, 0), Ok(()));
+        assert_eq!(game.play(Player::O, 0), Err(GameError::InvalidMove(0)));
+        assert_eq!(game.play(Player::O, 10), Err(GameError::InvalidMove(10)));
+        assert_eq!(game.play(Player::O, 8), Ok(()));
+    }
+
+    #[test]
+    fn test_not_your_turn() {
+        let mut game = Game::new();
+
+        assert_eq!(game.play(Player::O, 0), Err(GameError::NotYourTurn));
+        assert_eq!(game.play(Player::X, 0), Ok(()));
+        assert_eq!(game.play(Player::X, 4), Err(GameError::NotYourTurn));
+        assert_eq!(game.play(Player::O, 4), Ok(()));
+    }
+
+    #[test]
+    fn test_game_over_with_draw() {
         let mut game = Game::new();
 
         assert!(!game.is_over());
-
-        for i in 0..9 {
-            game.play(Player::X, i).unwrap();
-            assert!(!game.is_over());
-        }
+        assert_eq!(game.play(Player::X, 0), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::O, 4), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::X, 8), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::O, 3), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::X, 5), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::O, 2), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::X, 6), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::O, 7), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::X, 1), Ok(()));
 
         assert!(game.is_over());
+    }
+
+    #[test]
+    fn test_game_over_with_winner_x() {
+        let mut game = Game::new();
+
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::X, 0), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::O, 4), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::X, 1), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::O, 5), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::X, 2), Ok(()));
+
+        assert!(game.is_over());
+        assert_eq!(game.winner().unwrap(), Player::X);
+    }
+
+    #[test]
+    fn test_game_over_with_winner_o() {
+        let mut game = Game::new();
+
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::X, 0), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::O, 4), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::X, 1), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::O, 5), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::X, 6), Ok(()));
+        assert!(!game.is_over());
+        assert_eq!(game.play(Player::O, 3), Ok(()));
+
+        assert!(game.is_over());
+        assert_eq!(game.winner().unwrap(), Player::O);
     }
 }
