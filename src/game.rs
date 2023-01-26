@@ -37,8 +37,8 @@ const WINNING_COMBINATIONS: [[usize; 3]; 8] = [
 #[cw_serde]
 #[derive(Copy)]
 pub struct Game {
-    board: [Player; 9],
-    turn: Player,
+    pub(crate) board: [Player; 9],
+    pub(crate) turn: Player,
 }
 
 impl Game {
@@ -88,6 +88,16 @@ impl Game {
     pub fn is_over(&self) -> bool {
         self.winner().is_some() || self.board.iter().all(|&p| p != Player::None)
     }
+
+    /// Returns the board.
+    pub fn board(&self) -> &[Player; 9] {
+        &self.board
+    }
+
+    /// Returns the player whose turn it is.
+    pub fn turn(&self) -> Player {
+        self.turn
+    }
 }
 
 #[cfg(test)]
@@ -95,7 +105,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_create_game() {
+    fn game_creation() {
         let game = Game::new();
 
         assert_eq!(game.board, [Player::None; 9]);
@@ -103,7 +113,7 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_move() {
+    fn invalid_move() {
         let mut game = Game::new();
 
         assert_eq!(game.play(Player::X, 0), Ok(()));
@@ -113,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn test_not_your_turn() {
+    fn not_your_turn() {
         let mut game = Game::new();
 
         assert_eq!(game.play(Player::O, 0), Err(GameError::NotYourTurn));
@@ -123,7 +133,7 @@ mod tests {
     }
 
     #[test]
-    fn test_game_over_with_draw() {
+    fn game_over_with_draw() {
         let mut game = Game::new();
 
         assert!(!game.is_over());
@@ -149,7 +159,7 @@ mod tests {
     }
 
     #[test]
-    fn test_game_over_with_winner_x() {
+    fn game_over_with_winner_x() {
         let mut game = Game::new();
 
         assert!(!game.is_over());
@@ -168,7 +178,7 @@ mod tests {
     }
 
     #[test]
-    fn test_game_over_with_winner_o() {
+    fn game_over_with_winner_o() {
         let mut game = Game::new();
 
         assert!(!game.is_over());

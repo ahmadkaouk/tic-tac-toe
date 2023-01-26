@@ -53,6 +53,7 @@ pub struct GamesInfo {
     pub guest: String,
     pub host_role: Player,
     pub guest_role: Player,
+    pub pending_invitation: bool,
     pub current_game: Option<Game>,
     pub completed_games: Vec<Game>,
 }

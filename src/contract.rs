@@ -1,3 +1,4 @@
+use crate::game::Player;
 use crate::state::GAMES;
 use crate::{
     error::ContractError,
@@ -45,10 +46,7 @@ pub fn execute(
 
 mod exec {
     use super::*;
-    use crate::{
-        game::{Game, Player},
-        state::Games,
-    };
+    use crate::{game::Game, state::Games};
     use cosmwasm_std::ensure;
     use std::{
         collections::hash_map::DefaultHasher,
@@ -86,7 +84,7 @@ mod exec {
         GAMES.save(deps.storage, (&info.sender, guest_addr), &games)?;
 
         Ok(Response::default()
-            .add_attribute("action", "invit")
+            .add_attribute("action", "invite")
             .add_attribute("host", info.sender.to_string())
             .add_attribute("guest", guest_addr.to_string()))
     }
@@ -221,10 +219,7 @@ pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> Result<Binary, ContractErr
 
 mod query {
     use super::*;
-    use crate::{
-        game::Player,
-        msg::{AllGamesListResponse, GamesInfo, GamesResponse},
-    };
+    use crate::msg::{AllGamesListResponse, GamesInfo, GamesResponse};
     use cosmwasm_std::{Order, StdResult};
 
     pub fn games(
@@ -243,6 +238,7 @@ mod query {
             } else {
                 Player::O
             },
+            pending_invitation: games.pending_invition,
             current_game: games.current,
             completed_games: games.completed,
         };
@@ -263,6 +259,7 @@ mod query {
                     } else {
                         Player::O
                     },
+                    pending_invitation: value.pending_invition,
                     current_game: value.current,
                     completed_games: value.completed,
                 })
@@ -275,20 +272,848 @@ mod query {
 
 #[cfg(test)]
 mod tests {
-    use cosmwasm_std::testing::{mock_dependencies, mock_env, mock_info};
-
     use super::*;
+    use crate::{
+        game::{Game, GameError},
+        msg::{AllGamesListResponse, GamesInfo, GamesResponse},
+    };
+    use cosmwasm_std::{from_binary, StdError};
+    use cw_multi_test::{App, ContractWrapper, Executor};
+
+    // A macro rule to get an attribute value from an event
+    macro_rules! attribute {
+        ($event:expr, $key:expr) => {
+            $event
+                .attributes
+                .iter()
+                .find(|attr| attr.key == $key)
+                .unwrap()
+                .value
+        };
+    }
 
     #[test]
-    fn test_instantiate() {
-        let mut deps = mock_dependencies();
-        let info = mock_info("creator", &[]);
-        let msg = InstantiateMsg {};
+    fn proper_instantiation() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
 
-        let res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
+        let resp: AllGamesListResponse = app
+            .wrap()
+            .query_wasm_smart(contract_addr, &QueryMsg::AllGamesList {})
+            .unwrap();
+
+        assert_eq!(resp, AllGamesListResponse { games: vec![] });
+    }
+
+    #[test]
+    fn send_invitation() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
+
+        let resp = app
+            .execute_contract(
+                Addr::unchecked("sender"),
+                contract_addr.clone(),
+                &ExecuteMsg::Invite {
+                    guest: "guest".to_string(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        let event = resp.events.iter().find(|ev| ev.ty == "wasm").unwrap();
+
+        assert_eq!(attribute!(event, "action"), "invite");
+        assert_eq!(attribute!(event, "host"), "sender");
+        assert_eq!(attribute!(event, "guest"), "guest");
+
+        let resp: GamesResponse = app
+            .wrap()
+            .query_wasm_smart(
+                contract_addr,
+                &QueryMsg::Games {
+                    host: "sender".to_string(),
+                    guest: "guest".to_string(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(resp.info.host, "sender");
+        assert_eq!(resp.info.guest, "guest");
+        assert_eq!(resp.info.pending_invitation, true);
+    }
+
+    #[test]
+    fn invalid_invitation_game_in_progress() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
+
+        app.execute_contract(
+            Addr::unchecked("sender"),
+            contract_addr.clone(),
+            &ExecuteMsg::Invite {
+                guest: "guest".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        app.execute_contract(
+            Addr::unchecked("guest"),
+            contract_addr.clone(),
+            &ExecuteMsg::Accept {
+                host: "sender".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        let err = app
+            .execute_contract(
+                Addr::unchecked("sender"),
+                contract_addr,
+                &ExecuteMsg::Invite {
+                    guest: "guest".to_string(),
+                },
+                &[],
+            )
+            .unwrap_err();
+
         assert_eq!(
-            Response::default().add_attribute("action", "instantiate"),
-            res
+            ContractError::GameInProgress {
+                host: "sender".to_string(),
+                guest: "guest".to_string()
+            },
+            err.downcast().unwrap()
         );
+    }
+
+    #[test]
+    fn accept_invitation() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
+
+        app.execute_contract(
+            Addr::unchecked("sender"),
+            contract_addr.clone(),
+            &ExecuteMsg::Invite {
+                guest: "guest".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        let resp = app
+            .execute_contract(
+                Addr::unchecked("guest"),
+                contract_addr.clone(),
+                &ExecuteMsg::Accept {
+                    host: "sender".to_string(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        let event = resp.events.iter().find(|ev| ev.ty == "wasm").unwrap();
+
+        assert_eq!(attribute!(event, "action"), "accept invitation");
+        assert_eq!(attribute!(event, "host"), "sender");
+        assert_eq!(attribute!(event, "guest"), "guest");
+
+        let resp: GamesResponse = app
+            .wrap()
+            .query_wasm_smart(
+                contract_addr,
+                &QueryMsg::Games {
+                    host: "sender".to_string(),
+                    guest: "guest".to_string(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(resp.info.host, "sender");
+        assert_eq!(resp.info.guest, "guest");
+        assert_eq!(resp.info.pending_invitation, false);
+        assert_eq!(resp.info.current_game.unwrap().board(), &[Player::None; 9]);
+        assert_eq!(resp.info.current_game.unwrap().turn(), Player::X);
+    }
+
+    #[test]
+    fn no_pending_invitation() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
+
+        app.execute_contract(
+            Addr::unchecked("sender"),
+            contract_addr.clone(),
+            &ExecuteMsg::Invite {
+                guest: "guest".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // reject invitationj
+        app.execute_contract(
+            Addr::unchecked("guest"),
+            contract_addr.clone(),
+            &ExecuteMsg::Reject {
+                host: "sender".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        let err = app
+            .execute_contract(
+                Addr::unchecked("guest"),
+                contract_addr,
+                &ExecuteMsg::Accept {
+                    host: "sender".to_string(),
+                },
+                &[],
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            ContractError::NoPendingInvitation {
+                host: "sender".to_string(),
+                guest: "guest".to_string()
+            },
+            err.downcast().unwrap()
+        );
+    }
+
+    #[test]
+    fn reject_invitation() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
+
+        app.execute_contract(
+            Addr::unchecked("sender"),
+            contract_addr.clone(),
+            &ExecuteMsg::Invite {
+                guest: "guest".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        let resp = app
+            .execute_contract(
+                Addr::unchecked("guest"),
+                contract_addr.clone(),
+                &ExecuteMsg::Reject {
+                    host: "sender".to_string(),
+                },
+                &[],
+            )
+            .unwrap();
+
+        let event = resp.events.iter().find(|ev| ev.ty == "wasm").unwrap();
+
+        assert_eq!(attribute!(event, "action"), "reject invitation");
+        assert_eq!(attribute!(event, "host"), "sender");
+        assert_eq!(attribute!(event, "guest"), "guest");
+
+        let resp: GamesResponse = app
+            .wrap()
+            .query_wasm_smart(
+                contract_addr,
+                &QueryMsg::Games {
+                    host: "sender".to_string(),
+                    guest: "guest".to_string(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(resp.info.host, "sender");
+        assert_eq!(resp.info.guest, "guest");
+        assert_eq!(resp.info.pending_invitation, false);
+        assert_eq!(resp.info.current_game, None);
+    }
+
+    #[test]
+    fn invalid_reject() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
+
+        app.execute_contract(
+            Addr::unchecked("sender"),
+            contract_addr.clone(),
+            &ExecuteMsg::Invite {
+                guest: "guest".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        app.execute_contract(
+            Addr::unchecked("guest"),
+            contract_addr.clone(),
+            &ExecuteMsg::Reject {
+                host: "sender".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        let err = app
+            .execute_contract(
+                Addr::unchecked("guest"),
+                contract_addr,
+                &ExecuteMsg::Reject {
+                    host: "sender".to_string(),
+                },
+                &[],
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            ContractError::NoPendingInvitation {
+                host: "sender".to_string(),
+                guest: "guest".to_string()
+            },
+            err.downcast().unwrap()
+        );
+    }
+
+    #[test]
+    fn valid_play() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
+
+        // invite
+        app.execute_contract(
+            Addr::unchecked("sender"),
+            contract_addr.clone(),
+            &ExecuteMsg::Invite {
+                guest: "guest".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // accept invitation
+        app.execute_contract(
+            Addr::unchecked("guest"),
+            contract_addr.clone(),
+            &ExecuteMsg::Accept {
+                host: "sender".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // play
+        let resp = app
+            .execute_contract(
+                Addr::unchecked("guest"),
+                contract_addr.clone(),
+                &ExecuteMsg::Play {
+                    host: "sender".to_string(),
+                    guest: "guest".to_string(),
+                    cell: 4,
+                },
+                &[],
+            )
+            .unwrap();
+
+        let event = resp.events.iter().find(|ev| ev.ty == "wasm").unwrap();
+
+        assert_eq!(attribute!(event, "action"), "play");
+        assert_eq!(attribute!(event, "host"), "sender");
+        assert_eq!(attribute!(event, "guest"), "guest");
+        assert_eq!(attribute!(event, "cell"), "4");
+
+        let resp: GamesResponse = app
+            .wrap()
+            .query_wasm_smart(
+                contract_addr,
+                &QueryMsg::Games {
+                    host: "sender".to_string(),
+                    guest: "guest".to_string(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            GamesInfo {
+                host: "sender".to_string(),
+                guest: "guest".to_string(),
+                host_role: Player::O,
+                guest_role: Player::X,
+                current_game: Some(Game {
+                    board: [
+                        Player::None,
+                        Player::None,
+                        Player::None,
+                        Player::None,
+                        Player::X,
+                        Player::None,
+                        Player::None,
+                        Player::None,
+                        Player::None
+                    ],
+                    turn: Player::O,
+                }),
+                pending_invitation: false,
+                completed_games: vec![]
+            },
+            resp.info
+        );
+    }
+
+    #[test]
+    fn not_your_turn() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
+
+        // invite
+        app.execute_contract(
+            Addr::unchecked("sender"),
+            contract_addr.clone(),
+            &ExecuteMsg::Invite {
+                guest: "guest".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // accept invitation
+        app.execute_contract(
+            Addr::unchecked("guest"),
+            contract_addr.clone(),
+            &ExecuteMsg::Accept {
+                host: "sender".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // play
+        app.execute_contract(
+            Addr::unchecked("guest"),
+            contract_addr.clone(),
+            &ExecuteMsg::Play {
+                host: "sender".to_string(),
+                guest: "guest".to_string(),
+                cell: 4,
+            },
+            &[],
+        )
+        .unwrap();
+
+        let err = app
+            .execute_contract(
+                Addr::unchecked("guest"),
+                contract_addr,
+                &ExecuteMsg::Play {
+                    host: "sender".to_string(),
+                    guest: "guest".to_string(),
+                    cell: 5,
+                },
+                &[],
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            ContractError::GameError((GameError::NotYourTurn).into()),
+            err.downcast().unwrap()
+        );
+    }
+
+    #[test]
+    fn invalid_cell() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
+
+        // invite
+        app.execute_contract(
+            Addr::unchecked("sender"),
+            contract_addr.clone(),
+            &ExecuteMsg::Invite {
+                guest: "guest".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // accept invitation
+        app.execute_contract(
+            Addr::unchecked("guest"),
+            contract_addr.clone(),
+            &ExecuteMsg::Accept {
+                host: "sender".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // play
+        let err = app
+            .execute_contract(
+                Addr::unchecked("guest"),
+                contract_addr,
+                &ExecuteMsg::Play {
+                    host: "sender".to_string(),
+                    guest: "guest".to_string(),
+                    cell: 10,
+                },
+                &[],
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            ContractError::GameError((GameError::InvalidMove(10)).into()),
+            err.downcast().unwrap()
+        );
+    }
+
+    #[test]
+    fn cell_already_taken() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
+
+        // invite
+        app.execute_contract(
+            Addr::unchecked("sender"),
+            contract_addr.clone(),
+            &ExecuteMsg::Invite {
+                guest: "guest".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // accept invitation
+        app.execute_contract(
+            Addr::unchecked("guest"),
+            contract_addr.clone(),
+            &ExecuteMsg::Accept {
+                host: "sender".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // play
+        app.execute_contract(
+            Addr::unchecked("guest"),
+            contract_addr.clone(),
+            &ExecuteMsg::Play {
+                host: "sender".to_string(),
+                guest: "guest".to_string(),
+                cell: 4,
+            },
+            &[],
+        )
+        .unwrap();
+
+        let err = app
+            .execute_contract(
+                Addr::unchecked("sender"),
+                contract_addr,
+                &ExecuteMsg::Play {
+                    host: "sender".to_string(),
+                    guest: "guest".to_string(),
+                    cell: 4,
+                },
+                &[],
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            ContractError::GameError((GameError::InvalidMove(4)).into()),
+            err.downcast().unwrap()
+        );
+    }
+
+    #[test]
+    fn game_not_found() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
+
+        let err = app
+            .execute_contract(
+                Addr::unchecked("sender"),
+                contract_addr,
+                &ExecuteMsg::Play {
+                    host: "sender".to_string(),
+                    guest: "guest".to_string(),
+                    cell: 4,
+                },
+                &[],
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            ContractError::StdError(
+                (StdError::NotFound {
+                    kind: "tic_tac_toe::state::Games".to_string()
+                })
+                .into()
+            ),
+            err.downcast().unwrap()
+        );
+    }
+
+    #[test]
+    fn player_not_in_game() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
+
+        // invite
+        app.execute_contract(
+            Addr::unchecked("host"),
+            contract_addr.clone(),
+            &ExecuteMsg::Invite {
+                guest: "guest".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // accept invitation
+        app.execute_contract(
+            Addr::unchecked("guest"),
+            contract_addr.clone(),
+            &ExecuteMsg::Accept {
+                host: "host".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // play
+        let err = app
+            .execute_contract(
+                Addr::unchecked("player"),
+                contract_addr,
+                &ExecuteMsg::Play {
+                    host: "host".to_string(),
+                    guest: "guest".to_string(),
+                    cell: 4,
+                },
+                &[],
+            )
+            .unwrap_err();
+
+        assert_eq!(
+            ContractError::NotInvolved {
+                player: "player".to_string(),
+                host: "host".to_string(),
+                guest: "guest".to_string()
+            },
+            err.downcast().unwrap()
+        );
+    }
+
+    #[test]
+    fn game_over_winner_x() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
+
+        // invite
+        app.execute_contract(
+            Addr::unchecked("host"),
+            contract_addr.clone(),
+            &ExecuteMsg::Invite {
+                guest: "guest".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // accept invitation
+        app.execute_contract(
+            Addr::unchecked("guest"),
+            contract_addr.clone(),
+            &ExecuteMsg::Accept {
+                host: "host".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // play
+        play(&mut app, contract_addr.clone(), "host", 0);
+        play(&mut app, contract_addr.clone(), "guest", 1);
+        play(&mut app, contract_addr.clone(), "host", 3);
+        play(&mut app, contract_addr.clone(), "guest", 5);
+        play(&mut app, contract_addr.clone(), "host", 6);
+
+        let resp = app
+            .wrap()
+            .query_wasm_smart(
+                contract_addr,
+                &QueryMsg::Games {
+                    host: "host".to_string(),
+                    guest: "guest".to_string(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            GamesResponse {
+                info: GamesInfo {
+                    host: "host".to_string(),
+                    guest: "guest".to_string(),
+                    host_role: Player::X,
+                    guest_role: Player::O,
+                    pending_invitation: false,
+                    current_game: None,
+                    completed_games: vec![Game {
+                        board: [
+                            Player::X,
+                            Player::O,
+                            Player::None,
+                            Player::X,
+                            Player::None,
+                            Player::O,
+                            Player::X,
+                            Player::None,
+                            Player::None,
+                        ],
+                        turn: Player::O,
+                    }]
+                },
+            },
+            resp
+        );
+        assert!(resp.info.completed_games[0].is_over());
+        assert_eq!(Player::X, resp.info.completed_games[0].winner().unwrap());
+    }
+
+    #[test]
+    fn game_over_with_draw() {
+        let mut app = App::default();
+        let contract_addr = contract_address(&mut app);
+
+        // invite
+        app.execute_contract(
+            Addr::unchecked("host"),
+            contract_addr.clone(),
+            &ExecuteMsg::Invite {
+                guest: "guest".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // accept invitation
+        app.execute_contract(
+            Addr::unchecked("guest"),
+            contract_addr.clone(),
+            &ExecuteMsg::Accept {
+                host: "host".to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+
+        // play
+        play(&mut app, contract_addr.clone(), "host", 0);
+        play(&mut app, contract_addr.clone(), "guest", 4);
+        play(&mut app, contract_addr.clone(), "host", 8);
+        play(&mut app, contract_addr.clone(), "guest", 3);
+        play(&mut app, contract_addr.clone(), "host", 5);
+        play(&mut app, contract_addr.clone(), "guest", 2);
+        play(&mut app, contract_addr.clone(), "host", 6);
+        play(&mut app, contract_addr.clone(), "guest", 7);
+        play(&mut app, contract_addr.clone(), "host", 1);
+
+        let resp = app
+            .wrap()
+            .query_wasm_smart(
+                contract_addr,
+                &QueryMsg::Games {
+                    host: "host".to_string(),
+                    guest: "guest".to_string(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(
+            GamesResponse {
+                info: GamesInfo {
+                    host: "host".to_string(),
+                    guest: "guest".to_string(),
+                    host_role: Player::X,
+                    guest_role: Player::O,
+                    pending_invitation: false,
+                    current_game: None,
+                    completed_games: vec![Game {
+                        board: [
+                            Player::X,
+                            Player::X,
+                            Player::O,
+                            Player::O,
+                            Player::O,
+                            Player::X,
+                            Player::X,
+                            Player::O,
+                            Player::X,
+                        ],
+                        turn: Player::O,
+                    }]
+                },
+            },
+            resp
+        );
+        assert!(resp.info.completed_games[0].is_over());
+        assert!(resp.info.completed_games[0].winner().is_none());
+    }
+
+    fn invite(app: &mut App, contract_addr: Addr, host: &str, guest: &str) {
+        app.execute_contract(
+            Addr::unchecked(host),
+            contract_addr,
+            &ExecuteMsg::Invite {
+                guest: guest.to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+    }
+
+    fn accept(app: &mut App, contract_addr: Addr, host: &str, guest: &str) {
+        app.execute_contract(
+            Addr::unchecked(guest),
+            contract_addr,
+            &ExecuteMsg::Accept {
+                host: host.to_string(),
+            },
+            &[],
+        )
+        .unwrap();
+    }
+
+    fn init_game(app: &mut App, contract_addr: Addr, host: &str, guest: &str) {
+        invite(app, contract_addr.clone(), host, guest);
+        accept(app, contract_addr.clone(), host, guest);
+    }
+
+    fn play(app: &mut App, contract_addr: Addr, player: &str, cell: usize) {
+        app.execute_contract(
+            Addr::unchecked(player),
+            contract_addr,
+            &ExecuteMsg::Play {
+                host: "host".to_string(),
+                guest: "guest".to_string(),
+                cell,
+            },
+            &[],
+        )
+        .unwrap();
+    }
+
+    fn contract_address(app: &mut App) -> Addr {
+        let code = ContractWrapper::new(execute, instantiate, query);
+        let code_id = app.store_code(Box::new(code));
+        let sender = Addr::unchecked("Owner");
+
+        app.instantiate_contract(code_id, sender, &InstantiateMsg {}, &[], "Contract", None)
+            .unwrap()
     }
 }
