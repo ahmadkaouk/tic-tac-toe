@@ -89,11 +89,13 @@ impl Game {
         self.winner().is_some() || self.board.iter().all(|&p| p != Player::None)
     }
 
+    #[cfg(test)]
     /// Returns the board.
     pub fn board(&self) -> &[Player; 9] {
         &self.board
     }
 
+    #[cfg(test)]
     /// Returns the player whose turn it is.
     pub fn turn(&self) -> Player {
         self.turn

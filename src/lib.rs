@@ -6,6 +6,8 @@ mod error;
 mod game;
 mod msg;
 mod state;
+#[cfg(test)]
+mod cw_multitests;
 
 #[entry_point]
 pub fn instantiate(
