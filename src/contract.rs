@@ -308,11 +308,11 @@ mod tests {
 
         let event = resp.events.iter().find(|ev| ev.ty == "wasm").unwrap();
         assert_eq!(attribute!(event, "action"), "invite");
-        assert_eq!(attribute!(event, "host"), "sender");
+        assert_eq!(attribute!(event, "host"), "host");
         assert_eq!(attribute!(event, "guest"), "guest");
 
         let resp = game_mock.query_games("host", "guest").unwrap();
-        assert_eq!(resp.info.host, "sender");
+        assert_eq!(resp.info.host, "host");
         assert_eq!(resp.info.guest, "guest");
         assert_eq!(resp.info.pending_invitation, true);
     }
