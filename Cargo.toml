@@ -32,4 +32,5 @@ serde           = "1.0.152"
 thiserror       = "1.0.38"
 
 [dev-dependencies]
+anyhow = "1.0.68"
 cw-multi-test = "0.16.2"
