@@ -2,12 +2,12 @@ use cosmwasm_std::{entry_point, Binary, Deps, DepsMut, Env, MessageInfo, Respons
 use error::ContractError;
 
 mod contract;
+#[cfg(test)]
+mod cw_multitests;
 mod error;
 mod game;
 mod msg;
 mod state;
-#[cfg(test)]
-mod cw_multitests;
 
 #[entry_point]
 pub fn instantiate(

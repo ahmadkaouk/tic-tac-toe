@@ -1,7 +1,8 @@
 use crate::{
     contract,
+    error::ContractError,
     game::{Game, GameError, Player},
-    msg::{AllGamesListResponse, ExecuteMsg, GamesInfo, GamesResponse, InstantiateMsg, QueryMsg}, error::ContractError,
+    msg::{AllGamesListResponse, ExecuteMsg, GamesInfo, GamesResponse, InstantiateMsg, QueryMsg},
 };
 use anyhow::Error;
 use cosmwasm_std::{Addr, StdError};
