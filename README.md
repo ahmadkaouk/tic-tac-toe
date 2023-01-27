@@ -23,6 +23,72 @@ The cells of the grid are numbered from 0 to 8, as shown below:
 
 Roles of "X" and "O" are defined as follows: The user's public keys are concatenated and the result is hashed. If the first bit of the output is 0, then the game's initiator (whoever posted the invitation) plays "O" and the second player plays "X" and vice versa. “X” has the first moves.
 
+
+## Smart Contract Interface
+
+The smart contract interface is defined in the [contract](./contract) directory. The contract is written in Rust and uses the [CosmWasm](https:://github.com/CosmWasm/cosmwasm) framework. The contract is compiled to WebAssembly and deployed to the blockchain. The contract is written in a way that it can be used with any blockchain that supports CosmWasm.
+
+The contract exposes the following endpoints:
+
+### Instantiate
+
+The contract is instantiated with the following Message:
+
+```rust
+pub struct InstantiateMsg {}
+```
+
+### Execute
+
+The contract can execute the following Messages:
+
+```rust
+pub enum ExecuteMsg {
+    /// Invite a player to play a game.
+    Invite {
+        /// The address of the player to invite.
+        guest: String,
+    },
+    /// Accept an invitation to play a game.
+    Accept {
+        /// The address of the player who invited you.
+        host: String,
+    },
+    /// Reject an invitation to play a game.
+    Reject {
+        /// The address of the player who invited you.
+        host: String,
+    },
+    /// Play a move in the game.
+    Play {
+        /// The address of the host of the game.
+        host: String,
+        /// The address of the guest of the game.
+        guest: String,
+        /// The cell to play in.
+        cell: usize,
+    },
+}
+```
+
+### Query
+
+The contract can be queried with the following Messages:
+
+```rust
+pub enum QueryMsg {
+    /// Get all the games between two players.
+    Games {
+        /// The address of the host of the game.
+        host: String,
+        /// The address of the guest of the game.
+        guest: String,
+    },
+    /// Get all the games for all players.
+    AllGamesList {},
+}
+```
+
 ## Building
 
 ### Smart contracts
